@@ -1,0 +1,5 @@
+{
+  "name": "ResiTrack IM",
+  "description": "A comprehensive inpatient tracking and critical analysis tool for Internal Medicine residents. Manage history, daily follow-ups, rounds questions, and generate AI-assisted discharge summaries.",
+  "requestFramePermissions": []
+}

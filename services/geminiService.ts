@@ -1,5 +1,5 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Patient } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -106,4 +106,77 @@ export const generateDischargeSummary = async (patient: Patient): Promise<string
         console.error("AI Error:", error);
         return "Error generating discharge summary.";
     }
-}
+};
+
+export const generateSoapFromAudio = async (audioBase64: string, mimeType: string): Promise<{subjective: string, objective: string, assessmentPlan: string} | null> => {
+  const prompt = "Listen to this medical dictation. Extract the clinical information and format it into a SOAP note structure. Return a JSON object with keys: 'subjective', 'objective', 'assessmentPlan'. If specific information is missing, leave the field as an empty string. Use professional medical terminology.";
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: mimeType, data: audioBase64 } },
+          { text: prompt }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+                subjective: { type: Type.STRING },
+                objective: { type: Type.STRING },
+                assessmentPlan: { type: Type.STRING }
+            }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("AI Audio Error:", error);
+    return null;
+  }
+};
+
+export const generateHandoverGuidance = async (patient: Patient): Promise<string> => {
+    const prompt = `
+      You are preparing a Sign-Out / Handover for the night float team.
+      Generate a concise list of "If/Then" Anticipatory Guidance (Contingencies) for this patient.
+      
+      **Patient Context:**
+      - Diagnosis/CC: ${patient.chiefComplaint}
+      - History: ${patient.historyOfPresentIllness}
+      - Acuity: ${patient.acuity || 'Unknown'}
+      
+      **Recent Vitals (Last 3):**
+      ${patient.vitals.slice(-3).map(v => `${v.date}: BP ${v.bp}, HR ${v.hr}, Temp ${v.temp}, O2 ${v.o2}%`).join('\n')}
+      
+      **Recent Labs:**
+      ${patient.labs.slice(-2).map(l => l.values).join('\n')}
+      
+      **Latest Plan:**
+      ${patient.dailyNotes[0]?.assessmentPlan || 'No recent plan'}
+
+      **Task:**
+      Create a bulleted list of 3-5 specific "If/Then" scenarios relevant to this patient's condition to ensure safety overnight.
+      Example: "If T > 38.5, draw blood cultures and call resident."
+      Example: "If SBP < 90, bolus 500cc NS."
+      
+      Keep it brief and actionable.
+    `;
+  
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+      return response.text || "No specific contingencies generated.";
+    } catch (error) {
+      console.error("AI Error:", error);
+      return "Error generating handover guidance.";
+    }
+  };

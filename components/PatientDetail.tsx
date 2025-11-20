@@ -1,9 +1,10 @@
 
-import React, { useState } from 'react';
-import { Patient, DailyNote, Todo, Urgency, Ward, Role, Treatment, Investigation, VitalSign } from '../types';
-import { ArrowLeft, Plus, Save, FileText, Activity, Brain, AlertTriangle, CheckCircle, Circle, MapPin, UserCheck, Pill, Microscope, Trash2, X, Pencil } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Patient, DailyNote, Todo, Urgency, Ward, Role, Treatment, Investigation, VitalSign, CodeStatus, Acuity } from '../types';
+import { ArrowLeft, Plus, Save, FileText, Activity, Brain, AlertTriangle, CheckCircle, Circle, MapPin, UserCheck, Pill, Microscope, Trash2, X, Pencil, Mic, StopCircle, Loader2, Moon, Siren, ShieldAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { generateClinicalAnalysis, generateDischargeSummary } from '../services/geminiService';
+import { generateClinicalAnalysis, generateDischargeSummary, generateSoapFromAudio, generateHandoverGuidance } from '../services/geminiService';
+import { VitalTrends, LabTrends } from './Trends';
 
 interface PatientDetailProps {
   patient: Patient;
@@ -14,7 +15,7 @@ interface PatientDetailProps {
 const WARDS: Ward[] = ['MALE MEDICAL WARD', 'FEMALE MEDICAL WARD', 'RED ZONE', 'EICU', 'MICU'];
 
 const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdatePatient }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'treatment' | 'investigations' | 'daily' | 'analysis' | 'discharge'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'treatment' | 'investigations' | 'daily' | 'analysis' | 'signout' | 'discharge'>('overview');
   
   // Todo State
   const [newTodo, setNewTodo] = useState('');
@@ -46,6 +47,12 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
   const [noteSubjective, setNoteSubjective] = useState('');
   const [noteObjective, setNoteObjective] = useState('');
   const [noteAssessment, setNoteAssessment] = useState('');
+
+  // Audio Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const handleWardChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     onUpdatePatient({ ...patient, ward: e.target.value as Ward });
@@ -182,6 +189,74 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
     onUpdatePatient({ ...patient, dischargeSummary: summary });
     setLoadingAI(false);
   };
+  
+  const runHandoverGen = async () => {
+    setLoadingAI(true);
+    const guidance = await generateHandoverGuidance(patient);
+    onUpdatePatient({ ...patient, handoverGuidance: guidance });
+    setLoadingAI(false);
+  };
+
+  // Audio Recording Logic
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        await processAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop()); // Turn off mic
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      alert("Could not access microphone. Please ensure permissions are granted.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setIsProcessingAudio(true);
+    }
+  };
+
+  const processAudio = async (blob: Blob) => {
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+            const base64data = reader.result as string;
+            // The result comes as "data:audio/webm;base64,..." we need to extract content and mime type
+            const base64Content = base64data.split(',')[1];
+            const mimeType = base64data.split(',')[0].split(':')[1].split(';')[0];
+
+            const soap = await generateSoapFromAudio(base64Content, mimeType);
+            if (soap) {
+                setNoteSubjective(prev => (prev ? prev + '\n' : '') + (soap.subjective || ''));
+                setNoteObjective(prev => (prev ? prev + '\n' : '') + (soap.objective || ''));
+                setNoteAssessment(prev => (prev ? prev + '\n' : '') + (soap.assessmentPlan || ''));
+            }
+            setIsProcessingAudio(false);
+        }
+    } catch (e) {
+        console.error(e);
+        setIsProcessingAudio(false);
+        alert("Failed to transcribe audio.");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative">
@@ -213,6 +288,8 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
                     </select>
                     <MapPin className="w-3 h-3 text-blue-800 absolute right-2 top-1.5 pointer-events-none" />
                 </div>
+                
+                {patient.acuity === 'UNSTABLE' && <span className="flex items-center text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded animate-pulse"><Siren className="w-3 h-3 mr-1"/> UNSTABLE</span>}
             </div>
             <div className="flex gap-2 text-sm text-slate-500 items-center flex-wrap mt-1">
                <span>{patient.age}yo {patient.gender}</span>
@@ -246,6 +323,7 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
             { id: 'investigations', label: 'Labs/Img', icon: Microscope },
             { id: 'daily', label: 'Daily Notes', icon: FileText },
             { id: 'analysis', label: 'AI Analysis', icon: Brain },
+            { id: 'signout', label: 'Sign-out', icon: Moon },
             { id: 'discharge', label: 'Discharge', icon: Save }
           ].map((tab) => (
             <button
@@ -322,6 +400,26 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
 
             {/* Right Col: Todos & Vitals Snapshot */}
             <div className="space-y-6">
+               
+               {/* VITALS & TRENDS CARD */}
+               <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 relative">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider flex items-center">
+                        <Activity className="w-4 h-4 mr-2" /> Vitals Trends
+                    </h3>
+                    <button 
+                      onClick={() => setShowVitalModal(true)}
+                      className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors flex items-center font-medium"
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Add
+                    </button>
+                  </div>
+                  
+                  {patient.vitals.length > 0 ? (
+                    <VitalTrends vitals={patient.vitals} />
+                  ) : <p className="text-sm text-blue-400 italic">No vitals recorded yet.</p>}
+               </div>
+
                {/* Enhanced Todo List */}
                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                   <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center">
@@ -379,41 +477,6 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
                       </div>
                     ))}
                   </div>
-               </div>
-
-               <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 relative">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider">Latest Vitals</h3>
-                    <button 
-                      onClick={() => setShowVitalModal(true)}
-                      className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors flex items-center font-medium"
-                    >
-                      <Plus className="w-3 h-3 mr-1" /> Add
-                    </button>
-                  </div>
-                  {patient.vitals.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-4">
-                       <div>
-                         <span className="text-xs text-blue-400 block">BP</span>
-                         <span className="text-lg font-mono font-bold text-blue-900">{patient.vitals[patient.vitals.length-1].bp}</span>
-                       </div>
-                       <div>
-                         <span className="text-xs text-blue-400 block">HR</span>
-                         <span className="text-lg font-mono font-bold text-blue-900">{patient.vitals[patient.vitals.length-1].hr}</span>
-                       </div>
-                       <div>
-                         <span className="text-xs text-blue-400 block">Temp</span>
-                         <span className="text-lg font-mono font-bold text-blue-900">{patient.vitals[patient.vitals.length-1].temp}°C</span>
-                       </div>
-                       <div>
-                         <span className="text-xs text-blue-400 block">SpO2</span>
-                         <span className="text-lg font-mono font-bold text-blue-900">{patient.vitals[patient.vitals.length-1].o2}%</span>
-                       </div>
-                       <div className="col-span-2 border-t border-blue-100 pt-2 mt-1">
-                         <span className="text-xs text-blue-400">Recorded: {patient.vitals[patient.vitals.length-1].date}</span>
-                       </div>
-                    </div>
-                  ) : <p className="text-sm text-blue-400 italic">No vitals recorded</p>}
                </div>
             </div>
           </div>
@@ -516,6 +579,12 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
                  <h2 className="text-2xl font-bold text-slate-800">Investigations Chart</h2>
               </div>
               
+              {/* Labs Trend Card */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+                 <h3 className="text-sm font-bold text-slate-500 uppercase mb-2">Values Trending</h3>
+                 <LabTrends labs={patient.labs} />
+              </div>
+
               {/* Add New Inv */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex gap-3">
                  <input 
@@ -593,7 +662,30 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div>
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6 sticky top-20">
-                <h3 className="text-lg font-semibold mb-4">New Daily Round Note</h3>
+                <h3 className="text-lg font-semibold mb-4 flex items-center justify-between">
+                    <span>New Daily Round Note</span>
+                    {!isRecording && !isProcessingAudio && (
+                        <button 
+                            onClick={startRecording}
+                            className="text-xs flex items-center gap-1 bg-red-50 text-red-600 border border-red-100 px-3 py-1.5 rounded-full hover:bg-red-100 transition-colors font-medium"
+                        >
+                            <Mic className="w-3 h-3" /> Dictate Note
+                        </button>
+                    )}
+                    {isRecording && (
+                        <button 
+                            onClick={stopRecording}
+                            className="text-xs flex items-center gap-1 bg-red-600 text-white border border-red-600 px-3 py-1.5 rounded-full hover:bg-red-700 transition-colors animate-pulse font-medium"
+                        >
+                            <StopCircle className="w-3 h-3" /> Stop & Process
+                        </button>
+                    )}
+                    {isProcessingAudio && (
+                        <span className="text-xs flex items-center gap-1 text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Transcribing...
+                        </span>
+                    )}
+                </h3>
                 
                 <div className="space-y-4">
                     <div>
@@ -709,6 +801,98 @@ const PatientDetail: React.FC<PatientDetailProps> = ({ patient, onBack, onUpdate
               </div>
             )}
           </div>
+        )}
+        
+        {/* SIGNOUT / HANDOVER TAB */}
+        {activeTab === 'signout' && (
+           <div className="max-w-3xl mx-auto">
+               <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-slate-800 flex items-center">
+                        <Moon className="w-6 h-6 mr-2 text-indigo-600" /> Night Float / Handover
+                    </h2>
+               </div>
+
+               {/* Status Card */}
+               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       <div>
+                           <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Acuity Level</label>
+                           <div className="flex gap-2">
+                               {(['STABLE', 'WATCHER', 'UNSTABLE'] as Acuity[]).map(lvl => (
+                                   <button 
+                                        key={lvl}
+                                        onClick={() => onUpdatePatient({...patient, acuity: lvl})}
+                                        className={`flex-1 py-2 text-xs font-bold rounded border transition-all ${
+                                            patient.acuity === lvl 
+                                            ? (lvl === 'UNSTABLE' ? 'bg-red-100 border-red-200 text-red-700' : lvl === 'WATCHER' ? 'bg-yellow-100 border-yellow-200 text-yellow-700' : 'bg-green-100 border-green-200 text-green-700')
+                                            : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'
+                                        }`}
+                                   >
+                                       {lvl}
+                                   </button>
+                               ))}
+                           </div>
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Code Status</label>
+                           <select 
+                                className="w-full p-2 border border-slate-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                value={patient.codeStatus || 'FULL CODE'}
+                                onChange={e => onUpdatePatient({...patient, codeStatus: e.target.value as CodeStatus})}
+                           >
+                               <option value="FULL CODE">FULL CODE</option>
+                               <option value="DNR/DNI">DNR / DNI</option>
+                               <option value="LIMITED">LIMITED THERAPY</option>
+                           </select>
+                       </div>
+                   </div>
+               </div>
+
+               {/* Contingency Plan */}
+               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+                    <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
+                        <div>
+                            <h3 className="font-bold flex items-center"><ShieldAlert className="w-4 h-4 mr-2" /> Anticipatory Guidance (If/Then)</h3>
+                            <p className="text-xs text-slate-400 mt-1">Contingencies for the night team</p>
+                        </div>
+                        <button 
+                            onClick={runHandoverGen}
+                            disabled={loadingAI}
+                            className="bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded shadow transition-colors"
+                        >
+                            {loadingAI ? 'Generating...' : 'Generate with AI'}
+                        </button>
+                    </div>
+                    <div className="p-0">
+                        <textarea 
+                            className="w-full h-64 p-6 outline-none resize-none text-slate-700 leading-relaxed"
+                            placeholder="e.g. If Temp > 38.5, pan culture and call resident..."
+                            value={patient.handoverGuidance || ''}
+                            onChange={e => onUpdatePatient({...patient, handoverGuidance: e.target.value})}
+                        />
+                    </div>
+               </div>
+
+               {/* Active To-Dos for Night Team */}
+               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Pending Critical Tasks</h3>
+                    <div className="space-y-2">
+                        {patient.todos.filter(t => !t.completed).length === 0 ? (
+                            <p className="text-slate-400 text-sm italic">No pending tasks.</p>
+                        ) : (
+                            patient.todos.filter(t => !t.completed).map(todo => (
+                                <div key={todo.id} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                    <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${todo.urgency === 'High' || todo.urgency === 'Critical' ? 'text-red-500' : 'text-slate-400'}`} />
+                                    <div>
+                                        <p className="text-sm font-medium text-slate-800">{todo.text}</p>
+                                        <span className="text-xs text-slate-500">{todo.assignedTo} ({todo.assigneeRole})</span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+               </div>
+           </div>
         )}
 
         {/* DISCHARGE TAB */}

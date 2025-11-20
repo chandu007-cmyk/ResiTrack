@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PatientList from './components/PatientList';
 import PatientDetail from './components/PatientDetail';
 import RoundsTracker from './components/RoundsTracker';
@@ -23,8 +23,16 @@ const INITIAL_PATIENTS: Patient[] = [
     historyOfPresentIllness: '54yo M with hx of CHF presenting with 3 days of worsening dyspnea on exertion and orthopnea.',
     pastMedicalHistory: 'CHF (EF 35%), HTN, HLD, T2DM',
     systemicExamination: 'CVS: S1S2+, S3 gallop present. JVP elevated. Resp: Bilateral bibasilar crackles. Abd: Soft, non-tender. CNS: Intact.',
-    vitals: [{ date: '2023-10-26', bp: '145/90', hr: 88, rr: 22, temp: 37.1, o2: 94 }],
-    labs: [{ date: '2023-10-26', values: 'Na 135, K 4.2, Cr 1.4, BNP 800' }],
+    vitals: [
+        { date: '2023-10-24 10:00', bp: '150/95', hr: 92, rr: 24, temp: 37.2, o2: 91 },
+        { date: '2023-10-25 08:00', bp: '145/90', hr: 88, rr: 22, temp: 37.1, o2: 94 },
+        { date: '2023-10-26 08:00', bp: '135/85', hr: 82, rr: 20, temp: 37.0, o2: 96 }
+    ],
+    labs: [
+        { date: '2023-10-24', values: 'Na 135, K 4.2, Cr 1.4, BNP 800, WBC 12.5, Hgb 13.0' },
+        { date: '2023-10-25', values: 'Na 136, K 4.0, Cr 1.3, WBC 11.0' },
+        { date: '2023-10-26', values: 'Na 138, K 3.8, Cr 1.1, WBC 9.5' }
+    ],
     dailyNotes: [
       { 
         id: 'n1', 
@@ -47,7 +55,9 @@ const INITIAL_PATIENTS: Patient[] = [
       { id: 'inv2', name: 'CXR', dateOrdered: '2023-10-24', status: 'Completed', result: 'Pulmonary Edema' }
     ],
     hospitalCourse: '',
-    dischargeAdvice: ''
+    dischargeAdvice: '',
+    acuity: 'WATCHER',
+    codeStatus: 'FULL CODE'
   },
   {
     id: '2',
@@ -65,13 +75,15 @@ const INITIAL_PATIENTS: Patient[] = [
     pastMedicalHistory: 'None',
     systemicExamination: 'Abd: Tenderness at McBurney\'s point. Rebound tenderness positive. Guarding present.',
     vitals: [{ date: '2023-10-26', bp: '110/70', hr: 95, rr: 18, temp: 38.2, o2: 99 }],
-    labs: [],
+    labs: [{ date: '2023-10-26', values: 'WBC 16.5, Hgb 12.1, Plt 250' }],
     dailyNotes: [],
     todos: [],
     treatments: [],
     investigations: [],
     hospitalCourse: '',
-    dischargeAdvice: ''
+    dischargeAdvice: '',
+    acuity: 'STABLE',
+    codeStatus: 'FULL CODE'
   },
   {
     id: '3',
@@ -89,13 +101,15 @@ const INITIAL_PATIENTS: Patient[] = [
     pastMedicalHistory: 'Dementia, BPH',
     systemicExamination: 'CNS: Disoriented to time/place. GCS 13. Neck stiffness negative. Resp: Clear.',
     vitals: [{ date: '2023-10-26', bp: '90/50', hr: 110, rr: 24, temp: 39.1, o2: 90 }],
-    labs: [],
+    labs: [{ date: '2023-10-26', values: 'WBC 22.0, Lac 4.5, Cr 2.1' }],
     dailyNotes: [],
     todos: [],
     treatments: [],
     investigations: [],
     hospitalCourse: '',
-    dischargeAdvice: ''
+    dischargeAdvice: '',
+    acuity: 'UNSTABLE',
+    codeStatus: 'DNR/DNI'
   }
 ];
 
@@ -113,10 +127,34 @@ const INITIAL_QUESTIONS: RoundsQuestion[] = [
 ];
 
 const App: React.FC = () => {
-  const [patients, setPatients] = useState<Patient[]>(INITIAL_PATIENTS);
-  const [questions, setQuestions] = useState<RoundsQuestion[]>(INITIAL_QUESTIONS);
+  const [patients, setPatients] = useState<Patient[]>(() => {
+    try {
+      const saved = localStorage.getItem('resitrack_patients');
+      return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
+    } catch (e) {
+      return INITIAL_PATIENTS;
+    }
+  });
+
+  const [questions, setQuestions] = useState<RoundsQuestion[]>(() => {
+    try {
+      const saved = localStorage.getItem('resitrack_questions');
+      return saved ? JSON.parse(saved) : INITIAL_QUESTIONS;
+    } catch (e) {
+      return INITIAL_QUESTIONS;
+    }
+  });
+
   const [view, setView] = useState<ViewState>('DASHBOARD');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('resitrack_patients', JSON.stringify(patients));
+  }, [patients]);
+
+  useEffect(() => {
+    localStorage.setItem('resitrack_questions', JSON.stringify(questions));
+  }, [questions]);
 
   const handleSelectPatient = (id: string) => {
     setSelectedPatientId(id);
@@ -150,7 +188,9 @@ const App: React.FC = () => {
       treatments: [],
       investigations: [],
       hospitalCourse: '',
-      dischargeAdvice: ''
+      dischargeAdvice: '',
+      acuity: 'STABLE',
+      codeStatus: 'FULL CODE'
     };
     setPatients([newPatient, ...patients]);
     handleSelectPatient(newPatient.id);

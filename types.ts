@@ -10,6 +10,10 @@ export type Ward = 'MALE MEDICAL WARD' | 'FEMALE MEDICAL WARD' | 'RED ZONE' | 'E
 
 export type Role = 'Resident' | 'Intern';
 
+export type CodeStatus = 'FULL CODE' | 'DNR' | 'DNI' | 'DNR/DNI' | 'LIMITED';
+
+export type Acuity = 'STABLE' | 'WATCHER' | 'UNSTABLE';
+
 export interface VitalSign {
   date: string;
   bp: string;
@@ -101,6 +105,11 @@ export interface Patient {
   hospitalCourse: string;
   dischargeAdvice: string;
   
+  // Handover / Sign-out
+  codeStatus?: CodeStatus;
+  acuity?: Acuity;
+  handoverGuidance?: string;
+
   // AI Generated Fields
   aiDifferentialDiagnosis?: string;
   aiPrognosis?: string;

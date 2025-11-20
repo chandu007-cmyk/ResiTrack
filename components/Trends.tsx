@@ -76,14 +76,14 @@ export const VitalTrends: React.FC<{ vitals: VitalSign[] }> = ({ vitals }) => {
   const temp = vitals.map(v => v.temp);
   const o2 = vitals.map(v => v.o2);
 
-  const lastVital = vitals[vitals.length - 1] || {};
+  const lastVital = vitals[vitals.length - 1];
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <TrendCard label="SBP" value={lastVital.bp?.split('/')[0] || '--'} unit="mmHg" data={sysBp} color="#ef4444" />
-        <TrendCard label="HR" value={lastVital.hr?.toString() || '--'} unit="bpm" data={hr} color="#3b82f6" />
-        <TrendCard label="Temp" value={lastVital.temp?.toString() || '--'} unit="°C" data={temp} color="#f97316" />
-        <TrendCard label="SpO2" value={lastVital.o2?.toString() || '--'} unit="%" data={o2} color="#06b6d4" />
+        <TrendCard label="SBP" value={lastVital?.bp?.split('/')[0] || '--'} unit="mmHg" data={sysBp} color="#ef4444" />
+        <TrendCard label="HR" value={lastVital?.hr?.toString() || '--'} unit="bpm" data={hr} color="#3b82f6" />
+        <TrendCard label="Temp" value={lastVital?.temp?.toString() || '--'} unit="°C" data={temp} color="#f97316" />
+        <TrendCard label="SpO2" value={lastVital?.o2?.toString() || '--'} unit="%" data={o2} color="#06b6d4" />
     </div>
   );
 };

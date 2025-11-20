@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import PatientList from './components/PatientList';
 import PatientDetail from './components/PatientDetail';
@@ -132,6 +131,7 @@ const App: React.FC = () => {
       const saved = localStorage.getItem('resitrack_patients');
       return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
     } catch (e) {
+      console.error("Error loading patients from localStorage", e);
       return INITIAL_PATIENTS;
     }
   });
@@ -141,6 +141,7 @@ const App: React.FC = () => {
       const saved = localStorage.getItem('resitrack_questions');
       return saved ? JSON.parse(saved) : INITIAL_QUESTIONS;
     } catch (e) {
+      console.error("Error loading questions from localStorage", e);
       return INITIAL_QUESTIONS;
     }
   });
@@ -149,11 +150,19 @@ const App: React.FC = () => {
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('resitrack_patients', JSON.stringify(patients));
+    try {
+      localStorage.setItem('resitrack_patients', JSON.stringify(patients));
+    } catch (e) {
+      console.error("Error saving patients to localStorage", e);
+    }
   }, [patients]);
 
   useEffect(() => {
-    localStorage.setItem('resitrack_questions', JSON.stringify(questions));
+    try {
+      localStorage.setItem('resitrack_questions', JSON.stringify(questions));
+    } catch (e) {
+      console.error("Error saving questions to localStorage", e);
+    }
   }, [questions]);
 
   const handleSelectPatient = (id: string) => {
